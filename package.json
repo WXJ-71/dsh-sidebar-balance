@@ -10,6 +10,14 @@
     "url": "git+https://github.com/WXJ-71/dsh-sidebar-balance.git"
   },
   "homepage": "https://github.com/WXJ-71/dsh-sidebar-balance#readme",
+  "keywords": [
+    "deepseek",
+    "harness",
+    "dsh",
+    "plugin",
+    "balance",
+    "sidebar"
+  ],
   "icon": "./icon.png",
   "exports": {
     ".": "./index.js",

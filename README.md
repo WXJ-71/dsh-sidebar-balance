@@ -26,10 +26,16 @@ dsh plugin --profile web add https://github.com/WXJ-71/dsh-sidebar-balance
 装完在插件列表里启用 `@local/dsh-sidebar-balance`，刷新页面即可。完整步骤、依赖要求、
 卸载与排查见 [INSTALL.md](INSTALL.md)。
 
-- 要求 DeepSeek Harness `^0.1.7-rc.2`（已写进 `package.json` 的 `peerDependencies`，版本
-  不符时插件页会直接拒绝安装而不是装上去不工作）。
-- 余额要先在面板里点「登录」授权一次。
-- 余额由 Harness 的 Host 去平台读取，插件本身不直连平台、不额外增加请求。
+## 适用环境
+
+| 项目 | 说明 |
+| --- | --- |
+| 适用系统 / 界面 | DeepSeek Harness 的 **Web 界面**（`dsh web` / `dsh --profile web`）：手机浏览器、安卓 DSH 应用内嵌页面、桌面浏览器都适用。清单里以 `dsh.client.platform: "web"` 声明，不依赖任何桌面端组件。 |
+| Harness 版本 | **`^0.1.7-rc.2`** —— 0.1.7（含 `-rc` 预发布）起、0.2.0 之前。已写进 `package.json` 的 `peerDependencies`：版本不符时**插件页直接拒绝安装**并提示版本不兼容，不会出现「装上了却不工作」。核验方式见 [INSTALL.md](INSTALL.md#需要什么)。 |
+| 已验证版本 | `0.1.7-rc.2`（开发与实测环境：安卓 DSH 应用 + 手机浏览器） |
+| 依赖 | 无。只用 Harness 自带的 `sidebar.footer.action` 槽位与账户 Remote，不引入任何第三方包 |
+| 账号 | 需要 DeepSeek 开放平台账号：余额由 Harness 的 Host 读取，登录在浏览器里完成（授权回调落在本机回环地址） |
+| 网络 | 插件本身不直连平台；只有 Host 读余额、以及你点「登录」时才访问 `platform.deepseek.com` |
 
 ## 许可
 

@@ -38,7 +38,8 @@ dsh plugin --profile web add <spec>
 
 | 项目 | 说明 |
 | --- | --- |
-| Harness | `^0.1.7-rc.2`，也就是 0.1.7 起到 0.2.0 之前的版本（作者在 0.1.7-rc.2 上开发）。用到 `sidebar.footer.action` 槽位和 `remote.account`（账户 Remote）。 |
+| 适用系统 / 界面 | Harness 的 **Web 界面**（`dsh web` / `dsh --profile web`）：手机浏览器、安卓 DSH 应用内嵌页面、桌面浏览器都可。清单里声明 `dsh.client.platform: "web"`。 |
+| Harness | `^0.1.7-rc.2`，也就是 0.1.7 起到 0.2.0 之前的版本（已在 0.1.7-rc.2 实测）。用到 `sidebar.footer.action` 槽位和 `remote.account`（账户 Remote）。 |
 | 兼容性声明 | 本包声明了 `peerDependencies: { "@deepseek-ai/dsh": "^0.1.7-rc.2" }`，Harness 版本不在这个范围时**插件页会直接拒绝安装**并提示版本不兼容，而不是装上去之后悄悄不工作。它同时把该 peer 标为 `optional`，所以 pnpm 不会去公网下载一份完整的 dsh 运行时。 |
 | 账号 | 余额要登录后才显示。点侧栏那条的「登录」，会在新标签页打开 DeepSeek 开放平台，授权后余额自动出现。 |
 | 网络 | 余额由 Harness 的 Host 去 `platform.deepseek.com` 读取；插件本身不直连。 |
