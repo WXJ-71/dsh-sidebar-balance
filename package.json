@@ -1,6 +1,6 @@
 {
   "name": "@local/dsh-sidebar-balance",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "private": true,
   "type": "module",
   "description": "Shows the DeepSeek account balance at the sidebar foot",
