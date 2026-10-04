@@ -125,6 +125,8 @@ window.__ModuleLoader__.load({
       '.dsh-sidebar-balance_chip:hover,.dsh-sidebar-balance_chip[data-open]{background:var(--dsw-specific-sidebar-fill)}',
       '.dsh-sidebar-balance_chip:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:-2px}',
       '.dsh-sidebar-balance_icon{flex:none;display:inline-flex;color:var(--dsw-alias-label-primary)}',
+      '.dsh-sidebar-balance_iconIdle{color:var(--dsw-alias-state-success-primary)}',
+      '.dsh-sidebar-balance_iconPeak{color:var(--dsw-alias-state-error-primary)}',
       '.dsh-sidebar-balance_label{flex:none;color:var(--dsw-alias-label-primary)}',
       '.dsh-sidebar-balance_amount{margin-left:auto;flex:none;font-size:13px;font-variant-numeric:tabular-nums;color:var(--dsw-alias-label-primary)}',
       '.dsh-sidebar-balance_state{margin-left:auto;flex:none;font-size:12px;color:var(--dsw-alias-label-primary)}',
@@ -132,7 +134,6 @@ window.__ModuleLoader__.load({
       '.dsh-sidebar-balance_chip[data-state=pending] .dsh-sidebar-balance_state{color:var(--dsw-alias-brand-primary)}',
       '.dsh-sidebar-balance_chip[data-rail]{width:36px;height:36px;margin:0;padding:0;border-radius:50%;justify-content:center}',
       '.dsh-sidebar-balance_chip[data-rail] .dsh-sidebar-balance_label,.dsh-sidebar-balance_chip[data-rail] .dsh-sidebar-balance_amount,.dsh-sidebar-balance_chip[data-rail] .dsh-sidebar-balance_state{display:none}',
-      '.dsh-sidebar-balance_chip[data-rail] .dsh-sidebar-balance_icon{color:var(--dsw-alias-label-primary)}',
       '.dsh-sidebar-balance_panel{position:fixed;z-index:40;box-sizing:border-box;width:264px;padding:10px 12px;border:.5px solid var(--dsw-alias-border-l2);border-radius:12px;background:var(--dsw-alias-bg-overlay);box-shadow:var(--dsw-elevation-prominent,0 8px 24px rgba(0,0,0,.16));color:var(--dsw-alias-label-primary);font-family:inherit;font-size:13px;line-height:20px}',
       '.dsh-sidebar-balance_row{display:flex;justify-content:space-between;align-items:baseline;gap:12px;min-height:24px}',
       '.dsh-sidebar-balance_row+.dsh-sidebar-balance_row{margin-top:2px}',
@@ -150,15 +151,10 @@ window.__ModuleLoader__.load({
       '.dsh-sidebar-balance_action[data-variant=primary]{color:var(--dsw-alias-label-primary);border-color:var(--dsw-alias-brand-primary)}',
       '@keyframes dsh-sidebar-balance_spin{from{transform:rotate(0)}to{transform:rotate(360deg)}}',
       '.dsh-sidebar-balance_spin{animation:dsh-sidebar-balance_spin .9s linear infinite}',
-      '.dsh-sidebar-balance_dotPeak{fill:var(--dsw-alias-state-error-primary);fill:color-mix(in srgb,var(--dsw-alias-state-error-primary) 80%,#000);--dsh-sidebar-balance_glow:var(--dsw-alias-state-error-primary)}',
-      '.dsh-sidebar-balance_dotIdle{fill:var(--dsw-alias-state-success-primary);fill:color-mix(in srgb,var(--dsw-alias-state-success-primary) 80%,#000);--dsh-sidebar-balance_glow:var(--dsw-alias-state-success-primary)}',
-      '.dsh-sidebar-balance_dotMuted{opacity:.55}',
-      '@keyframes dsh-sidebar-balance_blink{0%,65%,100%{opacity:1}82%{opacity:.12}}',
-      '.dsh-sidebar-balance_dotActive{animation:dsh-sidebar-balance_blink 1.4s ease-in-out infinite;filter:saturate(1.35) drop-shadow(0 0 1.1px var(--dsh-sidebar-balance_glow))}',
       '.dsh-sidebar-balance_pops{position:fixed;left:0;top:0;z-index:35;pointer-events:none}',
       '.dsh-sidebar-balance_pop{position:absolute;transform:translate(-50%,0);color:var(--dsw-alias-state-error-primary);color:color-mix(in srgb,var(--dsw-alias-state-error-primary) 80%,#000);font-family:inherit;font-size:12px;font-weight:500;line-height:16px;font-variant-numeric:tabular-nums;white-space:nowrap;text-shadow:0 0 3px var(--dsw-specific-sidebar-fill);animation:dsh-sidebar-balance_float 1.6s ease-out forwards}',
       '@keyframes dsh-sidebar-balance_float{0%{opacity:0;transform:translate(-50%,6px)}15%{opacity:1}100%{opacity:0;transform:translate(-50%,-22px)}}',
-      '@media (prefers-reduced-motion: reduce){.dsh-sidebar-balance_spin{animation:none}.dsh-sidebar-balance_dotActive{animation:none}.dsh-sidebar-balance_pop{animation:none}}',
+      '@media (prefers-reduced-motion: reduce){.dsh-sidebar-balance_spin{animation:none}.dsh-sidebar-balance_pop{animation:none}}',
     ].join('');
 
     /**
@@ -176,18 +172,12 @@ window.__ModuleLoader__.load({
      * clear band above the clasp that 16 px does not have, and its `$` coin
      * overlaps the body at a size where the glyph would be illegible.
      *
-     * `offPeak` fills the blank left panel with the billing indicator: a red dot
-     * over a green one, centred in the band the clasp leaves free (x 2.95-7.44,
-     * so 1.5 clear on both sides), the active one blinking and the other held
-     * dim. `currentColor` keeps the outline on the theme's label tokens in light
-     * and dark, while the dots keep the theme's error and success tokens.
+     * The blank left panel stays blank: the two billing dots it used to hold are
+     * gone. The billing period rides on the whole glyph instead — every stroke
+     * is `currentColor`, so the caller's icon tone paints it green during
+     * off-peak discount hours and red during peak hours, in both themes.
      */
-    function WalletIcon({ size, offPeak }) {
-      const dot = (key, cx, cy, tone, active) => h('circle', {
-        key,
-        className: `dsh-sidebar-balance_dot${tone} dsh-sidebar-balance_dot${active ? 'Active' : 'Muted'}`,
-        cx, cy, r: '0.75',
-      });
+    function WalletIcon({ size }) {
       return h('svg', {
         width: size, height: size, viewBox: '0 0 16 16', fill: 'none',
         'aria-hidden': 'true', focusable: 'false', style: { display: 'block' },
@@ -203,8 +193,6 @@ window.__ModuleLoader__.load({
           stroke: 'currentColor', strokeWidth: '1.2',
         }),
         h('circle', { key: 'snap', cx: '10.14', cy: '8', r: '0.75', fill: 'currentColor' }),
-        dot('peakDot', '5.2', '6.6', 'Peak', offPeak !== true),
-        dot('idleDot', '5.2', '9.4', 'Idle', offPeak === true),
       ]);
     }
 
@@ -822,7 +810,10 @@ window.__ModuleLoader__.load({
           title: described,
           onClick: () => { setOpen((value) => !value); },
         }, [
-          h('span', { key: 'icon', className: 'dsh-sidebar-balance_icon' }, h(WalletIcon, { size: wide ? 16 : 18, offPeak })),
+          h('span', {
+            key: 'icon',
+            className: `dsh-sidebar-balance_icon ${offPeak ? 'dsh-sidebar-balance_iconIdle' : 'dsh-sidebar-balance_iconPeak'}`,
+          }, h(WalletIcon, { size: wide ? 16 : 18 })),
           wide ? h('span', { key: 'label', className: 'dsh-sidebar-balance_label' }, t('label')) : null,
           wide && amountText !== null ? h('span', { key: 'amount', className: 'dsh-sidebar-balance_amount' }, amountText) : null,
           wide && stateText !== null ? h('span', { key: 'state', className: 'dsh-sidebar-balance_state' }, stateText) : null,

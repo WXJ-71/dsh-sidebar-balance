@@ -6,7 +6,7 @@
 ![插件图标](icon.png)
 
 - **余额常在眼前** — 侧栏「设置」上方一条 `余额 ¥12.34`，点开是账户面板：充值余额与赠金余额、刷新、用量/充值入口，以及浏览器内的 DeepSeek 账号登录。
-- **计费时段一眼可辨** — 钱包图标里两颗点，**红点闪 = 计费高峰，绿点闪 = 空闲优惠**（UTC 01:00–04:00 与 06:00–10:00，周一至周五，中国法定节假日除外；节假日按空闲计）。
+- **计费时段一眼可辨** — **钱包图标红色 = 计费高峰，绿色 = 空闲优惠**（UTC 01:00–04:00 与 06:00–10:00，周一至周五，中国法定节假日除外；节假日按空闲计）。
 - **消耗数字弹出** — 余额真的减少时，这笔扣款会拆成一串 `-¥0.0031` 从钱包上方连续飘出，每 1–1.4 秒一个、每个停留 1.6 秒，**加总正好等于这次真实扣款**；不消费就不弹。
 
 ## 安装
@@ -84,10 +84,9 @@ One entry in the `sidebar.footer.action` slot (`id: account-balance`):
   the Remote error text; polling keeps retrying.
 - **collapsed sidebar** — a 36px circular icon-only button, like the Cordis
   panel beside it.
-- **billing indicator** — two dots inside the wallet's blank left panel, red
-  over green. The dot for the window that is open right now blinks and carries a
-  halo in its own colour; the other is held at 55% opacity, so the state also
-  reads without watching a blink. The chip's tooltip names the window
+- **billing indicator** — the wallet glyph itself is tinted by the window that
+  is open right now: red for peak, green for off-peak, in both themes and in the
+  icon-only rail chip as well. The chip's tooltip names the window
   (`· 计费高峰时段` / `· 空闲优惠时段`).
 
 - **spend popups** — when a read shows the wallet shrank, that drop floats above
@@ -107,15 +106,15 @@ full** ([pricing](https://api-docs.deepseek.com/quick_start/pricing)):
 
 | Rate | When (UTC) |
 | --- | --- |
-| peak (red dot blinks) | 01:00–04:00 and 06:00–10:00, Mon–Fri, except CN holidays |
-| off-peak (green dot blinks) | every other hour, all weekend, and every CN holiday |
+| peak (wallet red) | 01:00–04:00 and 06:00–10:00, Mon–Fri, except CN holidays |
+| off-peak (wallet green) | every other hour, all weekend, and every CN holiday |
 
-`peakAt(date)` in `client.js` is a pure function of the instant, so the dot is
+`peakAt(date)` in `client.js` is a pure function of the instant, so the tint is
 right whenever the page re-renders, and `useOffPeak` only exists to re-render at
 the edges: one timer re-arms for the next 00:00/01:00/04:00/06:00/10:00 UTC
 boundary, and a `visibilitychange` listener re-reads the clock because phones
 freeze timers while the tab is backgrounded. The window is evaluated in UTC, so
-the device's own timezone never changes which dot blinks.
+the device's own timezone never changes the tint.
 
 Holidays come from the State Council's yearly arrangement, listed per year in
 `CN_HOLIDAYS` as `MM-DD` (2026 is 国办发明电〔2025〕7号). The table is the one
@@ -126,22 +125,19 @@ there. Add the next year's dates from
 Shifting a weekend to a workday does not matter: DeepSeek bills weekends
 off-peak in full, `调休` or not.
 
-`prefers-reduced-motion` turns the blink off; the active dot then holds its
-deepened fill and halo against the dimmed one, so the window is still readable.
+`prefers-reduced-motion` has nothing to switch off here: the tint is static, so
+the window reads the same either way.
 
-The fills are the theme's state tokens mixed 20% toward black, so the dots read
-as deep rather than pastel — light `#ec1313` → `#bd0f0f` and `#22c55e` →
-`#1b9e4b`, dark `#f25a5a` → `#c24848`. Each rule declares the plain token first,
-so a browser without `color-mix` still paints a usable colour. The halo keeps the
-undarkened token, which is what makes the lit dot read as a bright rim over a
-deep core.
+The tint is the theme's own state token, painted through `currentColor`:
+`--dsw-alias-state-error-primary` for peak and `--dsw-alias-state-success-primary`
+for off-peak. Every stroke of the glyph carries it, so the wallet reads as one
+colour rather than a tinted detail. Reusing the tokens keeps it legible in light
+and dark without a colour of its own, and the icon-only rail chip takes the same
+tint — there it is the only signal the chip has.
 
-The blink itself is tuned beside them: `1.4s` with the curve dwelling at full
-opacity for 65% of the cycle before a quick dip to `.12`, and the active dot
-carrying `saturate(1.35)` plus a `drop-shadow` halo in its own colour
-(`--dsh-sidebar-balance_glow`). That averages about 1.8x the light of a symmetric
-fade; the period, the dip depth, the halo radius, and the `80%` mix are the
-knobs if it needs to be louder, calmer, or deeper.
+Two rules set it, and they sit after `.dsh-sidebar-balance_icon` in the sheet so
+they win on the element they share with it. The wallet's blank left panel, which
+used to hold the billing dots, stays blank.
 
 ## Spend popups
 
@@ -176,8 +172,9 @@ the same clearance as the 42px wide chip. The first frame leaves the digits abou
 half a line box above the wallet glyph's top edge, and neither the first nor the
 last frame of the rise touches the button. It stays under the account panel (40)
 without touching the sidebar's layout. The style is
-the peak dot's deep red (`--dsw-alias-state-error-primary` mixed 20% toward
-black, with the plain token declared first as a fallback), 12px at weight 500,
+the error token deepened for contrast (`--dsw-alias-state-error-primary` mixed
+20% toward black, with the plain token declared first as a fallback), 12px at
+weight 500,
 tabular figures, plus a soft shadow in the sidebar's own fill so the number stays
 legible over whatever it floats across.
 
