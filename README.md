@@ -160,6 +160,31 @@ Harness would serve can read it. The four statuses the page renders are `ready`
 upstream or network error text, trimmed to 200 chars), and `disabled` (the
 Config turned the section off).
 
+### Surviving a flaky resolver
+
+Measured on a machine whose DNS intermittently stalls: a cold `dns.lookup` took
+**7.3 s** while the next one answered in **10 ms**, and undici fails the request
+at its own ~10 s *connect* timeout — before this plugin's `fetchTimeoutMs` can
+matter. Two behaviours follow from that, and both are deliberately asymmetric
+with the happy path:
+
+- **A transport failure gets exactly one retry**, 500 ms later, and only when
+  the cause is one a second attempt can fix (`UND_ERR_CONNECT_TIMEOUT`,
+  `ETIMEDOUT`, `ECONNRESET`, `EAI_AGAIN`, …). A warm resolver answers that retry
+  instantly, so the read succeeds where a single attempt would have reported an
+  outage. Deterministic causes (`ENOTFOUND`, `ECONNREFUSED`), HTTP errors, and
+  this plugin's own timeout abort are *not* retried — a second round trip would
+  only delay an honest failure.
+- **Failures are cached for 5 seconds, not `cacheTtlMs`.** Replaying a blip for
+  the rest of the read interval is exactly when someone is staring at the panel
+  wondering why it still says unavailable; with the short failure TTL the next
+  poll shows the recovery instead.
+
+The error text also carries the syscall-level cause (`fetch failed /
+UND_ERR_CONNECT_TIMEOUT`), because undici reports every transport failure as the
+bare string `fetch failed` and hides the real one in `cause.cause` — without it
+an outage is indistinguishable from a bad address.
+
 With no DeepSeek wallet the chip falls back to the Moonshot available balance.
 That fallback keeps the wallet glyph **neutral**: the red/green tint is
 DeepSeek's billing window and is dropped — from the icon and from the tooltip —

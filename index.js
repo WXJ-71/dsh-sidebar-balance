@@ -21,6 +21,29 @@ const DEFAULT_KEY_REFS = ['MOONSHOTAI_CN_API_KEY', 'MOONSHOT_API_KEY'];
 /** Moonshot open-platform API root (the `moonshotai-cn` provider's host). */
 const DEFAULT_BASE_URL = 'https://api.moonshot.cn/v1';
 const JSON_HEADERS = { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' };
+/**
+ * A failed read is cached only this long. Holding a transient network blip for
+ * the full `cacheTtlMs` would keep showing an outage for the rest of the minute
+ * after connectivity is already back, which is exactly when someone is looking
+ * at the panel wondering why it is still broken.
+ */
+const FAILURE_CACHE_TTL_MS = 5_000;
+/** Wait before the single retry; a warm resolver answers immediately. */
+const RETRY_DELAY_MS = 500;
+/**
+ * Transport failures that a second attempt can plausibly fix. A cold DNS lookup
+ * and a dropped or timed-out connect usually succeed immediately afterwards;
+ * `ENOTFOUND` (no such host) and `ECONNREFUSED` are deterministic, so retrying
+ * those would only delay the report.
+ */
+const RETRIABLE_TRANSPORT_CODES = new Set([
+  'UND_ERR_CONNECT_TIMEOUT',
+  'UND_ERR_HEADERS_TIMEOUT',
+  'UND_ERR_SOCKET',
+  'ETIMEDOUT',
+  'ECONNRESET',
+  'EAI_AGAIN',
+]);
 
 export const Config = Schema.object({
   /** Credential references tried in order; the first configured one wins. */
@@ -42,6 +65,35 @@ function refsOf(value) {
   if (!Array.isArray(value)) return DEFAULT_KEY_REFS;
   const refs = value.filter((ref) => typeof ref === 'string' && ref !== '');
   return refs.length > 0 ? refs : DEFAULT_KEY_REFS;
+}
+
+/**
+ * The syscall-level code behind a failed fetch (`ENOTFOUND`, `ECONNRESET`,
+ * `UND_ERR_CONNECT_TIMEOUT`, …), or null when there is none to read.
+ */
+function transportCodeOf(cause) {
+  if (cause === null || typeof cause !== 'object') return null;
+  const inner = cause.cause;
+  if (inner !== null && typeof inner === 'object' && typeof inner.code === 'string') return inner.code;
+  return typeof cause.code === 'string' ? cause.code : null;
+}
+
+/**
+ * The reason a fetch threw, with the underlying cause named. `fetch` reports
+ * every transport failure as the bare string "fetch failed" and hides the real
+ * one (`ENOTFOUND`, `ECONNRESET`, `UND_ERR_CONNECT_TIMEOUT`, a TLS error) in
+ * `cause.cause`; without it an outage is indistinguishable from a bad address.
+ */
+function describeFetchError(cause) {
+  if (cause === null || typeof cause !== 'object') return String(cause);
+  const parts = [];
+  if (typeof cause.message === 'string' && cause.message !== '') parts.push(cause.message);
+  const inner = cause.cause;
+  if (inner !== null && typeof inner === 'object') {
+    if (typeof inner.code === 'string' && inner.code !== '') parts.push(inner.code);
+    else if (typeof inner.message === 'string' && inner.message !== '') parts.push(inner.message);
+  }
+  return parts.length > 0 ? parts.join(' / ') : String(cause);
 }
 
 export function apply(ctx, config = {}) {
@@ -75,10 +127,17 @@ export function apply(ctx, config = {}) {
       return null;
     }
 
-    /** One upstream wallet read, mapped to the small shape the page consumes. */
-    async function readBalance() {
+    /**
+     * One upstream attempt, plus whether a retry could plausibly fix it.
+     * Measured on this class of machine: a cold `dns.lookup` can take 7+ seconds
+     * and blow undici's 10s connect timeout, after which the very next attempt
+     * hits a warm cache and succeeds. Deterministic outcomes — a refusal, an
+     * HTTP error, or our own abort because the upstream is genuinely slow — are
+     * not worth a second round trip.
+     */
+    async function attemptBalance() {
       const key = await resolveKey();
-      if (key === null) return { ok: true, status: 'no-credential', settings };
+      if (key === null) return { payload: { ok: true, status: 'no-credential', settings } };
       const controller = new AbortController();
       const timer = setTimeout(() => { controller.abort(); }, fetchTimeoutMs);
       try {
@@ -93,46 +152,67 @@ export function apply(ctx, config = {}) {
           const message = json && json.error && typeof json.error.message === 'string'
             ? json.error.message
             : `HTTP ${response.status}`;
-          return { ok: true, status: 'failed', code: 'http', error: message.slice(0, 200), settings };
+          return { payload: { ok: true, status: 'failed', code: 'http', error: message.slice(0, 200), settings } };
         }
         const data = json && typeof json === 'object' ? json.data : null;
         if (data === null || typeof data !== 'object'
           || typeof data.available_balance !== 'number' || !Number.isFinite(data.available_balance)) {
-          return { ok: true, status: 'failed', code: 'payload', error: 'unexpected balance payload', settings };
+          return { payload: { ok: true, status: 'failed', code: 'payload', error: 'unexpected balance payload', settings } };
         }
         return {
-          ok: true,
-          status: 'ready',
-          currency: 'CNY',
-          available: data.available_balance,
-          cash: typeof data.cash_balance === 'number' && Number.isFinite(data.cash_balance) ? data.cash_balance : null,
-          voucher: typeof data.voucher_balance === 'number' && Number.isFinite(data.voucher_balance) ? data.voucher_balance : null,
-          settings,
+          payload: {
+            ok: true,
+            status: 'ready',
+            currency: 'CNY',
+            available: data.available_balance,
+            cash: typeof data.cash_balance === 'number' && Number.isFinite(data.cash_balance) ? data.cash_balance : null,
+            voucher: typeof data.voucher_balance === 'number' && Number.isFinite(data.voucher_balance) ? data.voucher_balance : null,
+            settings,
+          },
         };
       } catch (cause) {
         // `code` is what the page localizes; `error` keeps the provider's own
-        // words for the tooltip, so a report stays diagnosable.
+        // words — plus the underlying transport cause — for the tooltip, so a
+        // report stays diagnosable.
         const aborted = cause !== null && typeof cause === 'object' && cause.name === 'AbortError';
+        const transport = transportCodeOf(cause);
         return {
-          ok: true,
-          status: 'failed',
-          code: aborted ? 'timeout' : 'network',
-          error: aborted ? 'request timed out' : String((cause && cause.message) || cause).slice(0, 200),
-          settings,
+          payload: {
+            ok: true,
+            status: 'failed',
+            code: aborted ? 'timeout' : 'network',
+            error: (aborted ? 'request timed out' : describeFetchError(cause)).slice(0, 200),
+            settings,
+          },
+          retriable: !aborted && RETRIABLE_TRANSPORT_CODES.has(transport),
         };
       } finally {
         clearTimeout(timer);
       }
     }
 
-    /** Cached shared read: concurrent polls join one flight, errors never poison the cache. */
+    /** One upstream wallet read, retrying a warm-up-shaped transport failure once. */
+    async function readBalance() {
+      const first = await attemptBalance();
+      if (first.retriable !== true) return first.payload;
+      await new Promise((resolve) => { setTimeout(resolve, RETRY_DELAY_MS); });
+      const second = await attemptBalance();
+      return second.payload;
+    }
+
+    /**
+     * Cached shared read: concurrent polls join one flight. Successes ride the
+     * configured TTL; failures expire almost immediately so a blip cannot be
+     * replayed to the page for the rest of the interval.
+     */
     function balancePayload(refresh) {
-      if (!refresh && cache !== null && Date.now() - cache.at < cacheTtlMs) {
+      if (!refresh && cache !== null && Date.now() - cache.at < cache.ttlMs) {
         return Promise.resolve(cache.payload);
       }
       if (inFlight !== null) return inFlight;
       inFlight = readBalance().then((payload) => {
-        cache = { at: Date.now(), payload };
+        const failed = payload !== null && typeof payload === 'object' && payload.status === 'failed';
+        cache = { at: Date.now(), payload, ttlMs: failed ? Math.min(FAILURE_CACHE_TTL_MS, cacheTtlMs) : cacheTtlMs };
         inFlight = null;
         return payload;
       }, (cause) => {

@@ -17,7 +17,7 @@ Moonshot AI CN 余额，并标明 DeepSeek 的计费高峰/空闲时段。
 2. 进入**插件**页（Plugin Manager），点**安装**。
 3. 在安装输入框里粘贴下面任意一种位置，然后确认安装：
    - 本机上的压缩包绝对路径，例如
-     `/sdcard/Download/dsh-sidebar-balance-1.1.0.tgz`；
+     `/sdcard/Download/dsh-sidebar-balance-1.1.1.tgz`；
    - 解压出来的目录绝对路径，例如 `/sdcard/Download/dsh-sidebar-balance`；
    - 一个 Git 地址，例如
      `https://github.com/WXJ-71/dsh-sidebar-balance`。
