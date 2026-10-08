@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "Sidebar Balance",
-    "description": "Show the DeepSeek account balance at the foot of the sidebar, and sign in to a DeepSeek account in the browser."
+    "description": "Show the DeepSeek and Moonshot AI CN balances at the foot of the sidebar, and sign in to a DeepSeek account in the browser."
   }
 }

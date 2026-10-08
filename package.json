@@ -1,9 +1,9 @@
 {
   "name": "@local/dsh-sidebar-balance",
-  "version": "1.0.1",
+  "version": "1.1.0",
   "private": true,
   "type": "module",
-  "description": "Shows the DeepSeek account balance at the sidebar foot",
+  "description": "Shows the DeepSeek and Moonshot AI CN balances at the sidebar foot",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -35,7 +35,7 @@
     "INSTALL.md"
   ],
   "peerDependencies": {
-    "@deepseek-ai/dsh": "^0.1.7-rc.2"
+    "@deepseek-ai/dsh": "^0.2.0-rc.2"
   },
   "peerDependenciesMeta": {
     "@deepseek-ai/dsh": {

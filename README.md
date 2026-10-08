@@ -1,13 +1,13 @@
 # dsh-sidebar-balance
 
-给 DeepSeek Harness 的侧边栏底部加一条余额：账号余额、计费时段提示、消耗数字弹出。
+给 DeepSeek Harness 的侧边栏底部加一条余额：DeepSeek 账号余额、Moonshot AI CN 余额、计费时段提示。
 包名 `@local/dsh-sidebar-balance`，插件页显示为 **侧边栏余额** / **Sidebar Balance**。
 
 ![插件图标](icon.png)
 
 - **余额常在眼前** — 侧栏「设置」上方一条 `余额 ¥12.34`，点开是账户面板：充值余额与赠金余额、刷新、用量/充值入口，以及浏览器内的 DeepSeek 账号登录。
+- **Moonshot 余额同栏可见** — 面板里另有一节 `Moonshot AI CN`：可用余额、现金余额、赠金余额，随每分钟轮询一起刷新；DeepSeek 无余额时小芯片自动回落显示 Moonshot 可用余额。余额由 Host 半边经凭据缝读取 `MOONSHOTAI_CN_API_KEY`（回落 `MOONSHOT_API_KEY`）后访问 `api.moonshot.cn`，密钥不出本机。
 - **计费时段一眼可辨** — **钱包图标红色 = 计费高峰，绿色 = 空闲优惠**（UTC 01:00–04:00 与 06:00–10:00，周一至周五，中国法定节假日除外；节假日按空闲计）。
-- **消耗数字弹出** — 余额真的减少时，这笔扣款会拆成一串 `-¥0.0031` 从钱包上方连续飘出，每 1–1.4 秒一个、每个停留 1.6 秒，**加总正好等于这次真实扣款**；不消费就不弹。
 
 ## 安装
 
@@ -31,11 +31,11 @@ dsh plugin --profile web add https://github.com/WXJ-71/dsh-sidebar-balance
 | 项目 | 说明 |
 | --- | --- |
 | 适用系统 / 界面 | DeepSeek Harness 的 **Web 界面**（`dsh web` / `dsh --profile web`）：手机浏览器、安卓 DSH 应用内嵌页面、桌面浏览器都适用。清单里以 `dsh.client.platform: "web"` 声明，不依赖任何桌面端组件。 |
-| Harness 版本 | **`^0.1.7-rc.2`** —— 0.1.7（含 `-rc` 预发布）起、0.2.0 之前。已写进 `package.json` 的 `peerDependencies`：版本不符时**插件页直接拒绝安装**并提示版本不兼容，不会出现「装上了却不工作」。核验方式见 [INSTALL.md](INSTALL.md#需要什么)。 |
-| 已验证版本 | `0.1.7-rc.2`（开发与实测环境：安卓 DSH 应用 + 手机浏览器） |
-| 依赖 | 无。只用 Harness 自带的 `sidebar.footer.action` 槽位与账户 Remote，不引入任何第三方包 |
+| Harness 版本 | **`^0.2.0-rc.2`** —— 0.2.0（含 `-rc` 预发布）起、0.3.0 之前。已写进 `package.json` 的 `peerDependencies`：版本不符时**插件页直接拒绝安装**并提示版本不兼容，不会出现「装上了却不工作」。核验方式见 [INSTALL.md](INSTALL.md#需要什么)。 |
+| 已验证版本 | `0.2.0-rc.2` |
+| 依赖 | 只用 Harness 自带能力：`sidebar.footer.action` 槽位、账户 Remote，以及随 dsh 一起发布的 `@deepseek-ai/schemastery`（仅用于声明 `Config`，不必额外安装） |
 | 账号 | 需要 DeepSeek 开放平台账号：余额由 Harness 的 Host 读取，登录在浏览器里完成（授权回调落在本机回环地址） |
-| 网络 | 插件本身不直连平台；只有 Host 读余额、以及你点「登录」时才访问 `platform.deepseek.com` |
+| 网络 | 插件的浏览器半边不直连任何平台；只有 Host 读余额（DeepSeek 经账户 Remote、Moonshot 经 `api.moonshot.cn`）、以及你点「登录」时才访问外网 |
 
 ## 许可
 
@@ -89,10 +89,12 @@ One entry in the `sidebar.footer.action` slot (`id: account-balance`):
   icon-only rail chip as well. The chip's tooltip names the window
   (`· 计费高峰时段` / `· 空闲优惠时段`).
 
-- **spend popups** — when a read shows the wallet shrank, that drop floats above
-  the wallet as `-¥0.0031` style numbers: one every 1-1.4s, each rising and fading
-  over 1.6s, so the next number is already up before the previous fades. What one
-  read lost is what its popups add up to.
+- **Moonshot AI CN** — the panel carries a second section with the Moonshot
+  open-platform wallet: available balance plus the cash/voucher breakdown,
+  refreshed on the same 60-second poll, and the chip falls back to it when
+  there is no DeepSeek wallet. The page never sees the key — the Host half
+  reads `MOONSHOTAI_CN_API_KEY` (falling back to `MOONSHOT_API_KEY`) through
+  the credential seam and calls `api.moonshot.cn` itself.
 
 State refreshes on mount, every 60 seconds, and whenever the tab becomes
 visible. While a sign-in attempt is pending the cadence is 2 seconds, so the
@@ -139,49 +141,91 @@ Two rules set it, and they sit after `.dsh-sidebar-balance_icon` in the sheet so
 they win on the element they share with it. The wallet's blank left panel, which
 used to hold the billing dots, stays blank.
 
-## Spend popups
+## Moonshot balance
 
-The popups ride the reads the chip already makes — no extra Platform traffic.
-Each ready read totals every wallet row (`toppedUp` plus any positive
-`bonusWallets`) in millionths of the wallet currency and compares it with the
-previous read. The first ready read only sets the baseline, a top-up raises it
-silently, and a failed read leaves it alone, so a popup only ever prints real
-spending.
+The panel's `Moonshot AI CN` section rides the same poll as the DeepSeek read.
+The page never sees the key: the Host half registers one same-origin route,
+`/dsh-sidebar-balance/moonshot.json`, which resolves `MOONSHOTAI_CN_API_KEY`
+(then `MOONSHOT_API_KEY`) through `ctx.credentials.resolve` per read — the
+credential seam's rule, so a rotated key reaches the next poll without a
+restart — and calls `GET {baseUrl}/users/me/balance`. The route answers the
+available balance plus the cash/voucher breakdown, cached for 55 seconds so a
+burst of polls shares one upstream read; `?refresh=1` bypasses the cache (the
+panel's refresh button).
 
-A detected drop is queued, and one popup every 1-1.4s removes a share of it:
+Every request passes through Connection's `requestRejection`, the same
+browser-session trust fence the built-in JSON routes use, so only a page this
+Harness would serve can read it. The four statuses the page renders are `ready`
+(amounts), `no-credential` (a hint naming the missing ref), `failed` (the
+upstream or network error text, trimmed to 200 chars), and `disabled` (the
+Config turned the section off).
 
-- The share is sized when the drop is queued (`ceil(queue / SPEND_PIECES)`), not
-  per popup, so a drop drains over about 50 popups — the read interval divided by
-  the cadence, so one 60s read's spending lasts about 60s of popups instead of
-  emptying in a burst and leaving the rest of the minute blank. Sizing per popup
-  would decay geometrically instead.
-- The cadence (1-1.4s) is deliberately shorter than the 1.6s life, so one or two
-  numbers are in the air at a time and the column reads as a continuous stream.
-- The last popup of a queue takes the remainder, so the popups of one read add up
-  to exactly that read's drop, and the arithmetic never leaves the integer
-  millionths.
-- Shares under `SPEND_MIN_MICROS` (0.0001) wait in the queue rather than printing
-  a row of zeros.
+With no DeepSeek wallet the chip falls back to the Moonshot available balance.
+That fallback keeps the wallet glyph **neutral**: the red/green tint is
+DeepSeek's billing window and is dropped — from the icon and from the tooltip —
+whenever the chip is speaking for Moonshot. The section carries its own
+`更新于` stamp, because the two providers refresh on independent reads and one
+shared stamp would claim a freshness the Moonshot number may not have.
 
-Text is a minus, the wallet's own currency symbol (`symbolOf`), and as few
-decimals as the share needs (two at the least, four at the most) — no other words.
-It is positioned from the chip's live bounding rect in a fixed,
-`pointer-events: none` layer at `z-index: 35`, anchored `SPEND_LIFT` (34px) above
-the chip's **centre** — so the 36px rail chip, whose 18px glyph sits higher, keeps
-the same clearance as the 42px wide chip. The first frame leaves the digits about
-half a line box above the wallet glyph's top edge, and neither the first nor the
-last frame of the rise touches the button. It stays under the account panel (40)
-without touching the sidebar's layout. The style is
-the error token deepened for contrast (`--dsw-alias-state-error-primary` mixed
-20% toward black, with the plain token declared first as a fallback), 12px at
-weight 500,
-tabular figures, plus a soft shadow in the sidebar's own fill so the number stays
-legible over whatever it floats across.
+## Failures and keyboard
 
-`prefers-reduced-motion` drops the float; the number then simply holds its place
-for 1.6s. `SPEND_PIECES`, `SPEND_GAP_MS`, `SPEND_LIFE_MS`, `SPEND_MIN_MICROS`, and
-`SPEND_LIFT` are the knobs — a slower drip, a longer life, a bigger queue floor,
-or more clearance over the chip.
+Every failure carries a **code**, and the panel renders the code's localized
+text rather than raw provider English. The codes are the Host route's (`timeout`,
+`payload`, `http`, `network`, `unknown`), this half's own (`host-route`,
+`wallet`), and the account Remote's documented ones (`expired`, `storage`,
+`protocol`). A code with no dictionary entry still prints whatever text arrived
+— an unmapped message is worth more to a reader than a generic replacement — and
+where a localized line and a provider message both exist, the provider's words
+follow a `·` separator and stay in the element's `title`, so a report stays
+diagnosable.
+
+The panel follows the host's modal-layer conventions (its `useModalLayer`, whose
+focusable selector this plugin copies rather than redefining):
+
+- opening moves focus into the panel once it has been measured — the panel
+  renders hidden until its position is known, and a hidden element cannot take
+  focus;
+- Tab wraps inside the panel instead of walking the page behind it;
+- Escape closes only while this panel owns focus, so a host modal opened on top
+  keeps its own Escape;
+- closing hands focus back to whatever opened the panel, unless the close came
+  from clicking something else — that click owns focus then.
+
+It deliberately declares `aria-modal="true"` **without** a scrim: interaction
+and keyboard ownership match a modal, but the popover still dismisses on a click
+anywhere else and never dims the app.
+
+## Config
+
+Both halves are driven by one row config, written in your profile's
+`cordis.patch.yml`. Defaults suit the common case, so the row needs no config
+at all:
+
+```yaml
+- id: sidebar-balance
+  name: '@local/dsh-sidebar-balance'
+  config:
+    keyRefs: ['MOONSHOTAI_CN_API_KEY', 'MOONSHOT_API_KEY']
+    baseUrl: https://api.moonshot.cn/v1
+    cacheTtlMs: 55000
+    fetchTimeoutMs: 20000
+    pollIntervalMs: 60000
+    showMoonshot: true
+```
+
+| Field | Default | Effect |
+| --- | --- | --- |
+| `keyRefs` | both Moonshot refs | Credential references tried in order; the first configured one wins |
+| `baseUrl` | `https://api.moonshot.cn/v1` | API root; the wallet endpoint is `${baseUrl}/users/me/balance` |
+| `cacheTtlMs` | `55000` | How long one upstream read is served to every poll |
+| `fetchTimeoutMs` | `20000` | Hard ceiling on one upstream read |
+| `pollIntervalMs` | `60000` | Cadence the page polls both providers at |
+| `showMoonshot` | `true` | Off hides the section; the route then answers `disabled` without touching credentials or the network |
+
+The page cannot read a Host plugin's Config, so the route echoes the two
+client-relevant fields (`pollIntervalMs`, `showMoonshot`) on every answer and
+the panel adopts them — which is why changing the cadence or hiding the section
+takes effect on the next poll instead of needing a reload.
 
 ## The sign-in flow
 
@@ -215,24 +259,44 @@ next poll adopts its id again.
   from a 1155×1229 source that already carries a transparent background. Only
   the plugin list, bundle list, and inventory rows read it; the sidebar chip
   keeps its inline wallet glyph in `client.js`.
-- `index.js` — Host half; it renders nothing and owns no service.
+- `index.js` — Host half: one authenticated same-origin route,
+  `/dsh-sidebar-balance/moonshot.json`, resolving the Moonshot credential
+  through `ctx.credentials` and reading the wallet from `api.moonshot.cn` with
+  a short cache, so the key never leaves the Host. It also declares the
+  plugin's `Config`.
 - `client.js` — the browser half: the `sidebar.footer.action` registration, the
-  chip and account panel, the spend popups, the sign-in flow, inline styles, the
+  chip and account panel, the Moonshot section, the sign-in flow, inline styles, the
   inline `WalletIcon` / `RefreshIcon` glyphs, the `peakAt` / `useOffPeak`
   billing-window helpers, and the `sidebar.balance` dictionaries (en/zh).
 
 ## Maintenance
 
 `clientMetadata()` in `client.js` sends `x-client-version` to the Platform. It
-pins the Harness version this bundle was authored against (`0.1.7-rc.2`); bump
+pins the Harness version this bundle was authored against (`0.2.0-rc.2`); bump
 it after upgrading the Harness.
 
-`package.json` declares `peerDependencies: { "@deepseek-ai/dsh": "^0.1.7-rc.2" }`,
+`package.json` declares `peerDependencies: { "@deepseek-ai/dsh": "^0.2.0-rc.2" }`,
 which is what the manager's compatibility preflight reads: outside that range the
 plugin is refused at install time instead of failing silently later. The matching
 `peerDependenciesMeta` entry marks it optional so a package manager never tries to
-fetch a whole dsh runtime for it. Widen the range when the slot and account Remote
-interfaces are confirmed on a newer line.
+fetch a whole dsh runtime for it.
+
+Do **not** judge that range by default `semver` semantics. `dsh-app-boot`
+evaluates it as `semver.satisfies(runtime, range, { includePrerelease: true })`,
+and `includePrerelease` is what lets one caret range cover the whole `0.2.x`
+line **including its prereleases**:
+
+| runtime | `^0.2.0-rc.2` with `includePrerelease` | without |
+| --- | --- | --- |
+| `0.2.0-rc.2` | covered | covered |
+| `0.2.1-alpha.1` | **covered** | not covered |
+| `0.2.9` | covered | covered |
+| `0.3.0-rc.1` | not covered | not covered |
+
+So the range already spans `0.2.0-rc.2` through the end of the `0.2` line; the
+next real decision point is `0.3.0`, not the next `0.2.x` prerelease. The
+`test-sidebar-balance-host.mjs` peer-range block re-checks this table against the
+installed runtime so the reasoning above cannot silently rot.
 
 A `link:` install into a profile keeps this directory live: editing `client.js`
 is picked up by Client HMR when the web dev watcher is running, and by a page

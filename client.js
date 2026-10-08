@@ -6,39 +6,23 @@ window.__ModuleLoader__.load({
 
     /** Dictionary namespace owned by this plugin. */
     const NS = 'sidebar.balance';
+    /** Fallback cadence; the Host Config's `pollIntervalMs` takes over once it answers. */
     const POLL_MS = 60_000;
     /** Faster cadence while a browser sign-in attempt is in flight. */
     const SIGN_IN_POLL_MS = 2_000;
     /** Platform amounts are unsigned decimal strings; anything else is not displayable. */
     const AMOUNT = /^(0|[1-9][0-9]*)(\.[0-9]+)?$/;
-    /** Spend arithmetic runs in millionths of the wallet currency, so shares add up exactly. */
-    const MICROS = 1_000_000;
+    /** Same-origin route the Host half answers with the Moonshot wallet read. */
+    const MOONSHOT_URL = '/dsh-sidebar-balance/moonshot.json';
+    /** Stable id linking the chip's aria-controls to the panel it opens. */
+    const PANEL_ID = 'dsh-sidebar-balance-panel';
     /**
-     * Spend popups. One balance read's drop is drained over this many pieces, which
-     * is the read interval divided by the popup cadence below (60s / 1.2s), so the
-     * minute of spending just detected lasts about a minute of popups instead of
-     * emptying in a burst and leaving the rest of the minute blank.
+     * The host's own focusable selector, copied so Tab ownership matches the
+     * modal layer rather than inventing a second definition of "focusable".
      */
-    const SPEND_PIECES = 50;
-    /**
-     * One popup every 1-1.4s against a 1.6s life, so the next number is already up
-     * before the previous fades — the column reads as one continuous stream rather
-     * than separate blips, with one or two numbers in the air at a time.
-     */
-    const SPEND_GAP_MS = [1_000, 1_400];
-    const SPEND_LIFE_MS = 1_600;
-    /**
-     * How far above the chip's centre a popup is anchored. Measured from the centre
-     * rather than the top edge so the 36px rail chip, whose 18px glyph sits higher,
-     * gets the same clearance as the 42px wide chip. The line box is 16px and starts
-     * 6px into the rise, so this leaves the digits' ink about 7px above the wallet
-     * glyph's top edge — half a line box — while staying clear of the button itself.
-     */
-    const SPEND_LIFT = 34;
-    /** Shares below this wait in the queue instead of printing a row of zeros. */
-    const SPEND_MIN_MICROS = 100;
+    const FOCUSABLE = 'button:not(:disabled), input:not(:disabled), textarea:not(:disabled), select:not(:disabled), a[href], [tabindex="0"]';
     /** The client version this bundle was authored against, sent as `x-client-version`. */
-    const CLIENT_VERSION = '0.1.7-rc.2';
+    const CLIENT_VERSION = '0.2.0-rc.2';
     /**
      * DeepSeek bills the standard rate in two UTC windows on weekdays, and the
      * discount rate in every other hour — weekends and Chinese public holidays in
@@ -93,6 +77,21 @@ window.__ModuleLoader__.load({
       empty: 'No wallet returned',
       peak: 'peak billing hours',
       offPeak: 'off-peak discount hours',
+      deepseek: 'DeepSeek',
+      moonshot: 'Moonshot AI CN',
+      moonshotCash: 'Cash balance',
+      moonshotVoucher: 'Voucher balance',
+      moonshotNoKey: 'No Moonshot credential (MOONSHOTAI_CN_API_KEY) is configured.',
+      errorUnknown: 'Unknown error',
+      errorTimeout: 'The Moonshot read timed out',
+      errorPayload: 'Moonshot returned an unexpected payload',
+      errorHttp: 'Moonshot refused the read',
+      errorNetwork: 'Could not reach the provider',
+      errorHostRoute: 'Host route missing — restart the Harness to finish updating this plugin',
+      errorWallet: 'The Platform wallet read failed',
+      errorExpired: 'The sign-in attempt expired',
+      errorStorage: 'The stored grant could not be read',
+      errorProtocol: 'The sign-in callback origin was rejected',
     };
 
     const zh = {
@@ -118,6 +117,21 @@ window.__ModuleLoader__.load({
       empty: '没有返回钱包',
       peak: '计费高峰时段',
       offPeak: '空闲优惠时段',
+      deepseek: 'DeepSeek',
+      moonshot: 'Moonshot AI CN',
+      moonshotCash: '现金余额',
+      moonshotVoucher: '赠金余额',
+      moonshotNoKey: '未配置 Moonshot 凭据（MOONSHOTAI_CN_API_KEY）。',
+      errorUnknown: '未知错误',
+      errorTimeout: 'Moonshot 读取超时',
+      errorPayload: 'Moonshot 返回了无法识别的数据',
+      errorHttp: 'Moonshot 拒绝了这次读取',
+      errorNetwork: '无法连接到服务方',
+      errorHostRoute: 'Host 路由缺失——重启 Harness 以完成插件更新',
+      errorWallet: '平台钱包读取失败',
+      errorExpired: '登录尝试已超时',
+      errorStorage: '已保存的授权无法解析',
+      errorProtocol: '登录回调地址被拒绝',
     };
 
     const CSS = [
@@ -135,6 +149,7 @@ window.__ModuleLoader__.load({
       '.dsh-sidebar-balance_chip[data-rail]{width:36px;height:36px;margin:0;padding:0;border-radius:50%;justify-content:center}',
       '.dsh-sidebar-balance_chip[data-rail] .dsh-sidebar-balance_label,.dsh-sidebar-balance_chip[data-rail] .dsh-sidebar-balance_amount,.dsh-sidebar-balance_chip[data-rail] .dsh-sidebar-balance_state{display:none}',
       '.dsh-sidebar-balance_panel{position:fixed;z-index:40;box-sizing:border-box;width:264px;padding:10px 12px;border:.5px solid var(--dsw-alias-border-l2);border-radius:12px;background:var(--dsw-alias-bg-overlay);box-shadow:var(--dsw-elevation-prominent,0 8px 24px rgba(0,0,0,.16));color:var(--dsw-alias-label-primary);font-family:inherit;font-size:13px;line-height:20px}',
+      '.dsh-sidebar-balance_panel:focus{outline:none}',
       '.dsh-sidebar-balance_row{display:flex;justify-content:space-between;align-items:baseline;gap:12px;min-height:24px}',
       '.dsh-sidebar-balance_row+.dsh-sidebar-balance_row{margin-top:2px}',
       '.dsh-sidebar-balance_rowLabel{min-width:0;color:var(--dsw-alias-label-secondary)}',
@@ -151,10 +166,7 @@ window.__ModuleLoader__.load({
       '.dsh-sidebar-balance_action[data-variant=primary]{color:var(--dsw-alias-label-primary);border-color:var(--dsw-alias-brand-primary)}',
       '@keyframes dsh-sidebar-balance_spin{from{transform:rotate(0)}to{transform:rotate(360deg)}}',
       '.dsh-sidebar-balance_spin{animation:dsh-sidebar-balance_spin .9s linear infinite}',
-      '.dsh-sidebar-balance_pops{position:fixed;left:0;top:0;z-index:35;pointer-events:none}',
-      '.dsh-sidebar-balance_pop{position:absolute;transform:translate(-50%,0);color:var(--dsw-alias-state-error-primary);color:color-mix(in srgb,var(--dsw-alias-state-error-primary) 80%,#000);font-family:inherit;font-size:12px;font-weight:500;line-height:16px;font-variant-numeric:tabular-nums;white-space:nowrap;text-shadow:0 0 3px var(--dsw-specific-sidebar-fill);animation:dsh-sidebar-balance_float 1.6s ease-out forwards}',
-      '@keyframes dsh-sidebar-balance_float{0%{opacity:0;transform:translate(-50%,6px)}15%{opacity:1}100%{opacity:0;transform:translate(-50%,-22px)}}',
-      '@media (prefers-reduced-motion: reduce){.dsh-sidebar-balance_spin{animation:none}.dsh-sidebar-balance_pop{animation:none}}',
+      '@media (prefers-reduced-motion: reduce){.dsh-sidebar-balance_spin{animation:none}}',
     ].join('');
 
     /**
@@ -223,41 +235,9 @@ window.__ModuleLoader__.load({
       return value.toFixed(2);
     }
 
-    /** Signed symbol for one Platform wallet currency. */
+    /** Signed symbol for one wallet currency. */
     function symbolOf(currency) {
       return currency === 'CNY' ? '¥' : '$';
-    }
-
-    /** One wallet amount as an integer of millionths, or null when it is unusable. */
-    function micros(amount) {
-      if (!usable(amount)) return null;
-      const [whole, fraction = ''] = String(amount).trim().split('.');
-      return Number(whole) * MICROS + Number(`${fraction}000000`.slice(0, 6));
-    }
-
-    /** Every wallet row added up, or null when a row is unusable or there are none. */
-    function totalMicros(rows) {
-      if (rows.length === 0) return null;
-      let total = 0;
-      for (const row of rows) {
-        const value = micros(row.amount);
-        if (value === null) return null;
-        total += value;
-      }
-      return total;
-    }
-
-    /**
-     * Spending text with as few decimals as the value needs, two at the least and
-     * four at the most, so a sub-cent drop shows its own digits instead of the
-     * chip's `<0.01` form without turning into a long tail. The queued shares stay
-     * whole millionths; only this text rounds.
-     */
-    function formatSpend(value) {
-      for (let digits = 2; digits < 4; digits += 1) {
-        if (value % 10 ** (6 - digits) === 0) return (value / MICROS).toFixed(digits);
-      }
-      return (value / MICROS).toFixed(4);
     }
 
     /** Full display text of one wallet amount. */
@@ -324,6 +304,52 @@ window.__ModuleLoader__.load({
         if (typeof cause.message === 'string') return cause.message;
       }
       return String(cause);
+    }
+
+    /**
+     * Display key for every failure this plugin can show. The Host route codes
+     * (`timeout`, `payload`, `http`, `network`, `unknown`) and this half's own
+     * codes (`host-route`, `wallet`) are ours; `expired`, `storage`, and
+     * `protocol` are the account Remote's documented codes. Anything else is
+     * provider text and is printed as it arrives — an unmapped message is worth
+     * more to a reader than a generic replacement.
+     */
+    const FAILURE_KEYS = {
+      timeout: 'errorTimeout',
+      payload: 'errorPayload',
+      http: 'errorHttp',
+      network: 'errorNetwork',
+      unknown: 'errorUnknown',
+      'host-route': 'errorHostRoute',
+      wallet: 'errorWallet',
+      expired: 'errorExpired',
+      storage: 'errorStorage',
+      protocol: 'errorProtocol',
+    };
+
+    /** One failure as `{ code?, error? }`, keeping the code a Remote outcome carries. */
+    function remoteFailure(cause) {
+      if (cause !== null && typeof cause === 'object' && typeof cause !== 'string') {
+        const error = cause.error;
+        if (error !== null && typeof error === 'object' && typeof error.code === 'string') {
+          return { code: error.code, error: typeof error.message === 'string' ? error.message : undefined };
+        }
+      }
+      return { error: messageOf(cause) };
+    }
+
+    /**
+     * Localized text for a failure, with the provider's own words kept after a
+     * separator so the message stays diagnosable without being unreadable.
+     */
+    function failureText(t, failure) {
+      if (failure === null || failure === undefined) return t('errorUnknown');
+      if (typeof failure === 'string') return failure;
+      const code = typeof failure.code === 'string' ? failure.code : null;
+      const detail = typeof failure.error === 'string' && failure.error !== '' ? failure.error : null;
+      const key = code === null ? undefined : FAILURE_KEYS[code];
+      if (key === undefined) return detail ?? t('errorUnknown');
+      return detail === null || detail === t(key) ? t(key) : `${t(key)} · ${detail}`;
     }
 
     /** One wallet line inside the panel. */
@@ -409,91 +435,45 @@ window.__ModuleLoader__.load({
       const hostRef = React.useRef(null);
       const panelRef = React.useRef(null);
       const refreshRef = React.useRef(() => {});
+      const moonshotRefreshRef = React.useRef(() => {});
       const openUrlRef = React.useRef(() => false);
       const active = React.useRef(true);
       const offPeak = useOffPeak();
-      const [pops, setPops] = React.useState([]);
-      const pendingRef = React.useRef(0);
-      const shareRef = React.useRef(0);
-      const spendTimerRef = React.useRef(null);
-      const spendLifeRef = React.useRef([]);
-      const totalRef = React.useRef(null);
-      const currencyRef = React.useRef(null);
-      const popSeqRef = React.useRef(0);
+      /** Moonshot (moonshotai-cn) wallet payload from the Host route, or null until the first answer. */
+      const [moonshot, setMoonshot] = React.useState(null);
+      const [moonshotBusy, setMoonshotBusy] = React.useState(false);
+      /** When the last successful Moonshot read landed, so the two sources never share one stamp. */
+      const [moonshotAt, setMoonshotAt] = React.useState(null);
+      /** In-flight feedback for the DeepSeek read; unlike `phase` it moves on every poll. */
+      const [deepseekBusy, setDeepseekBusy] = React.useState(false);
+      /** Both knobs arrive from the Host Config on every answer. */
+      const [pollMs, setPollMs] = React.useState(POLL_MS);
+      const [showMoonshot, setShowMoonshot] = React.useState(true);
+      /** At most one DeepSeek read at a time; a poll and a click must never stack. */
+      const deepseekInFlight = React.useRef(false);
+      /** Overlapping Moonshot reads are fine (the Host merges them), so count rather than drop. */
+      const moonshotPending = React.useRef(0);
+      /** What had focus when the panel opened, so closing can hand it back. */
+      const restoreFocusRef = React.useRef(null);
+      /** Set when a click outside closed the panel: that click owns focus now. */
+      const clickClosedRef = React.useRef(false);
 
       React.useEffect(() => () => {
         active.current = false;
-        if (spendTimerRef.current !== null) clearTimeout(spendTimerRef.current);
-        for (const timer of spendLifeRef.current) clearTimeout(timer);
       }, []);
 
-      const pumpRef = React.useRef(() => {});
-
-      /** Arm the next popup; nothing is queued while the pending drop is too small to print. */
-      const armSpend = React.useCallback(() => {
-        if (spendTimerRef.current !== null || pendingRef.current < SPEND_MIN_MICROS) return;
-        const [from, to] = SPEND_GAP_MS;
-        spendTimerRef.current = setTimeout(() => {
-          spendTimerRef.current = null;
-          pumpRef.current();
-        }, from + Math.random() * (to - from));
-      }, []);
-
-      /**
-       * Queue one detected drop. The share is sized from the whole queue, so the
-       * popups of a drop are spread over about `SPEND_PIECES` of them rather than
-       * decaying geometrically, and every share is a whole millionth.
-       */
-      const queueSpend = React.useCallback((drop) => {
-        pendingRef.current += drop;
-        shareRef.current = Math.max(SPEND_MIN_MICROS, Math.ceil(pendingRef.current / SPEND_PIECES));
-        armSpend();
-      }, [armSpend]);
-
-      /**
-       * Float one share of the queued spending above the wallet, then re-arm while
-       * any is left. Shares are whole millionths, so the popups of one detected
-       * drop add up to exactly that drop.
-       */
-      pumpRef.current = () => {
-        const pending = pendingRef.current;
-        if (pending < SPEND_MIN_MICROS) return;
-        const share = Math.min(pending, shareRef.current);
-        pendingRef.current = pending - share;
-        const rect = hostRef.current === null ? null : hostRef.current.getBoundingClientRect();
-        if (rect !== null) {
-          popSeqRef.current += 1;
-          const id = popSeqRef.current;
-          setPops((current) => [...current, {
-            id,
-            text: `-${symbolOf(currencyRef.current)}${formatSpend(share)}`,
-            left: wide === true ? rect.left + 16 : rect.left + rect.width / 2,
-            top: rect.top + rect.height / 2 - SPEND_LIFT,
-          }]);
-          const life = setTimeout(() => {
-            spendLifeRef.current = spendLifeRef.current.filter((timer) => timer !== life);
-            setPops((current) => current.filter((pop) => pop.id !== id));
-          }, SPEND_LIFE_MS);
-          spendLifeRef.current = [...spendLifeRef.current, life];
-        }
-        armSpend();
-      };
-
-      const refresh = React.useCallback(async () => {
-        if (account === undefined || account === null) {
-          setPhase('unavailable');
-          return;
-        }
+      /** One DeepSeek read. The caller owns the in-flight flag; this never guards itself. */
+      const readDeepseek = React.useCallback(async () => {
         setPhase((current) => (current === 'ready' ? current : 'loading'));
         let view = null;
         try {
           const answered = await account.getState();
           if (!active.current) return;
           if (answered.ok) view = answered.value;
-          else setError(messageOf(answered));
+          else setError(remoteFailure(answered));
         } catch (cause) {
           if (!active.current) return;
-          setError(messageOf(cause));
+          setError(remoteFailure(cause));
         }
         if (!active.current) return;
         if (view === null) {
@@ -526,7 +506,7 @@ window.__ModuleLoader__.load({
           const answered = await account.getBalance(clientMetadata(locale));
           if (!active.current) return;
           if (!answered.ok) {
-            setError(messageOf(answered));
+            setError(remoteFailure(answered));
             setPhase('failed');
             return;
           }
@@ -536,43 +516,114 @@ window.__ModuleLoader__.load({
           if (value !== null && typeof value === 'object' && value.status === 'ready') {
             setError(null);
             setPhase('ready');
-            /**
-             * Queue whatever this read lost since the last one. The first ready
-             * read only sets the baseline, a top-up raises it silently, and a
-             * failed read never moves it — so a popup only ever prints real spend.
-             */
-            const walletRows = walletsOf(value);
-            const total = totalMicros(walletRows);
-            currencyRef.current = headline(walletRows)?.currency ?? null;
-            const previous = totalRef.current;
-            totalRef.current = total;
-            if (previous !== null && total !== null && total < previous) {
-              queueSpend(previous - total);
-            }
           } else {
-            setError('the Platform wallet read failed');
+            setError({ code: 'wallet' });
             setPhase('failed');
           }
         } catch (cause) {
           if (!active.current) return;
-          setError(messageOf(cause));
+          setError(remoteFailure(cause));
           setPhase('failed');
         }
       }, [account, readLocale]);
 
+      /**
+       * Refresh entry point: one read at a time, with in-flight feedback the
+       * button can actually see. `readDeepseek` deliberately keeps a settled
+       * `ready` phase so the chip never flickers — which is exactly why the
+       * button cannot derive its own state from `phase`.
+       */
+      const refresh = React.useCallback(async () => {
+        if (account === undefined || account === null) {
+          setPhase('unavailable');
+          return;
+        }
+        if (deepseekInFlight.current) return;
+        deepseekInFlight.current = true;
+        setDeepseekBusy(true);
+        try {
+          await readDeepseek();
+        } finally {
+          deepseekInFlight.current = false;
+          if (active.current) setDeepseekBusy(false);
+        }
+      }, [account, readDeepseek]);
+
       refreshRef.current = refresh;
 
+      /** Adopt the Host Config knobs every answer carries; the page cannot read the Config itself. */
+      const applySettings = React.useCallback((payload) => {
+        const settings = payload !== null && typeof payload === 'object' ? payload.settings : null;
+        if (settings === null || typeof settings !== 'object') return;
+        if (typeof settings.showMoonshot === 'boolean') setShowMoonshot(settings.showMoonshot);
+        if (typeof settings.pollIntervalMs === 'number' && Number.isFinite(settings.pollIntervalMs)) {
+          setPollMs(Math.min(3_600_000, Math.max(10_000, settings.pollIntervalMs)));
+        }
+      }, []);
+
+      /**
+       * Poll the Host's Moonshot route. `bypass` skips its short server-side
+       * cache (the refresh button); the plain poll rides it. Overlapping reads
+       * are allowed — the Host merges them — so the busy flag is counted, not
+       * latched, and the button keeps its spinner until the last one lands.
+       */
+      const refreshMoonshot = React.useCallback(async (bypass) => {
+        moonshotPending.current += 1;
+        setMoonshotBusy(true);
+        try {
+          const response = await fetch(bypass === true ? `${MOONSHOT_URL}?refresh=1` : MOONSHOT_URL, { cache: 'no-store' });
+          if (!active.current) return;
+          const type = response.headers.get('content-type') ?? '';
+          if (!response.ok || !type.includes('json')) {
+            // The Host route answers JSON; anything else means the Host half
+            // is older than this build (restart the Harness) and the SPA
+            // fallback served the page instead.
+            setMoonshot({ ok: false, status: 'failed', code: 'host-route' });
+            return;
+          }
+          const payload = await response.json();
+          if (!active.current) return;
+          setMoonshot(payload);
+          applySettings(payload);
+          if (payload !== null && typeof payload === 'object' && payload.status === 'ready') {
+            setMoonshotAt(Date.now());
+          }
+        } catch (cause) {
+          if (!active.current) return;
+          setMoonshot({ ok: false, status: 'failed', code: 'network', error: messageOf(cause) });
+        } finally {
+          moonshotPending.current -= 1;
+          if (moonshotPending.current === 0 && active.current) setMoonshotBusy(false);
+        }
+      }, [applySettings]);
+
+      moonshotRefreshRef.current = refreshMoonshot;
+
+      /** One read of both sources on mount; the cadence below is a separate owner. */
       React.useEffect(() => {
         refreshRef.current();
-        const timer = setInterval(() => { refreshRef.current(); }, POLL_MS);
+        moonshotRefreshRef.current();
+      }, []);
+
+      /** Cadence follows the Host Config, so a patch change lands without a reload. */
+      React.useEffect(() => {
+        const timer = setInterval(() => {
+          refreshRef.current();
+          moonshotRefreshRef.current();
+        }, pollMs);
+        return () => { clearInterval(timer); };
+      }, [pollMs]);
+
+      /** Phones freeze timers while hidden, so a returning tab reads immediately. */
+      React.useEffect(() => {
         const onVisible = () => {
-          if (document.visibilityState === 'visible') refreshRef.current();
+          if (document.visibilityState === 'visible') {
+            refreshRef.current();
+            moonshotRefreshRef.current();
+          }
         };
         document.addEventListener('visibilitychange', onVisible);
-        return () => {
-          clearInterval(timer);
-          document.removeEventListener('visibilitychange', onVisible);
-        };
+        return () => { document.removeEventListener('visibilitychange', onVisible); };
       }, []);
 
       /** Poll faster while the Platform finishes a sign-in attempt. */
@@ -605,7 +656,7 @@ window.__ModuleLoader__.load({
           if (!active.current) return;
           if (!answered.ok) {
             setSignIn({
-              id: null, phase: null, url: null, error: messageOf(answered), opening: false, popupBlocked: false,
+              id: null, phase: null, url: null, error: remoteFailure(answered), opening: false, popupBlocked: false,
             });
             return;
           }
@@ -629,7 +680,7 @@ window.__ModuleLoader__.load({
         } catch (cause) {
           if (!active.current) return;
           setSignIn({
-            id: null, phase: null, url: null, error: messageOf(cause), opening: false, popupBlocked: false,
+            id: null, phase: null, url: null, error: remoteFailure(cause), opening: false, popupBlocked: false,
           });
         }
       }, [account, readLocale]);
@@ -667,6 +718,11 @@ window.__ModuleLoader__.load({
         return () => { window.removeEventListener('resize', place); };
       }, [open]);
 
+      /**
+       * Popover keyboard ownership, mirroring the host's modal layer: only the
+       * layer that owns focus takes Escape, Tab wraps inside the panel instead
+       * of walking the page behind it, and a pointer elsewhere dismisses.
+       */
       React.useEffect(() => {
         if (!open) return undefined;
         const onPointerDown = (event) => {
@@ -674,10 +730,31 @@ window.__ModuleLoader__.load({
           const panel = panelRef.current;
           if (host !== null && host.contains(event.target)) return;
           if (panel !== null && panel.contains(event.target)) return;
+          clickClosedRef.current = true;
           setOpen(false);
         };
         const onKeyDown = (event) => {
-          if (event.key === 'Escape') setOpen(false);
+          const panel = panelRef.current;
+          if (panel === null) return;
+          const focused = document.activeElement;
+          // A host modal opened on top moves focus into itself and keeps Escape.
+          if (focused !== null && focused !== document.body && !panel.contains(focused)) return;
+          if (event.key === 'Escape') {
+            if (event.shiftKey) return;
+            event.preventDefault();
+            setOpen(false);
+            return;
+          }
+          if (event.key !== 'Tab') return;
+          const items = [...panel.querySelectorAll(FOCUSABLE)]
+            .filter((item) => item.closest('[inert], [hidden]') === null);
+          const first = items[0] ?? panel;
+          const last = items[items.length - 1] ?? panel;
+          const atEdge = event.shiftKey ? focused === first : focused === last;
+          if (focused === panel || atEdge) {
+            event.preventDefault();
+            (event.shiftKey ? last : first).focus();
+          }
         };
         document.addEventListener('pointerdown', onPointerDown, true);
         document.addEventListener('keydown', onKeyDown);
@@ -687,25 +764,74 @@ window.__ModuleLoader__.load({
         };
       }, [open]);
 
+      /**
+       * Focus lifetime: remember what opened the panel, give it back when the
+       * panel closes on its own terms, and stay out of the way when the user
+       * closed it by clicking something else.
+       */
+      React.useLayoutEffect(() => {
+        if (!open) return undefined;
+        clickClosedRef.current = false;
+        restoreFocusRef.current = document.activeElement;
+        return () => {
+          if (clickClosedRef.current) return;
+          const target = restoreFocusRef.current;
+          if (target !== null && typeof target.focus === 'function' && target.isConnected) target.focus();
+        };
+      }, [open]);
+
+      /**
+       * Take focus once the panel is placed. It renders hidden until `origin` is
+       * measured, and a hidden element cannot take focus, so this waits for that
+       * measurement instead of racing it.
+       */
+      React.useLayoutEffect(() => {
+        if (!open || origin === null) return undefined;
+        const panel = panelRef.current;
+        if (panel === null || panel.contains(document.activeElement)) return undefined;
+        panel.focus();
+        return undefined;
+      }, [open, origin]);
+
       const rows = walletsOf(balance);
       const top = headline(rows);
-      const busy = phase === 'loading';
+      /** Initial-load feedback only: a settled `ready` phase is preserved on purpose. */
+      const loading = phase === 'loading';
+      /** Any provider read in flight — what the refresh button reports. */
+      const inFlight = deepseekBusy || moonshotBusy;
       const signingIn = pendingPhase(signIn.phase) || signIn.opening;
       const amountText = top === undefined ? null : displayAmount(top);
+      const moonshotReady = showMoonshot && moonshot !== null && moonshot.status === 'ready';
+      const moonshotNoKey = moonshot !== null && moonshot.status === 'no-credential';
+      const moonshotFailed = showMoonshot && moonshot !== null && !moonshotReady && !moonshotNoKey && moonshotBusy !== true;
+      const moonshotAmount = moonshotReady ? `¥${formatAmount(String(moonshot.available))}` : null;
+      /** The chip prefers DeepSeek; with no DeepSeek wallet it falls back to Moonshot. */
+      const chipAmount = amountText !== null ? amountText : moonshotAmount;
+      /** True when the shown amount is Moonshot's, so DeepSeek billing must not colour it. */
+      const moonshotOnly = amountText === null && moonshotAmount !== null;
       const chipState = signingIn ? 'pending' : phase;
       const stateText = signingIn ? t('waiting')
-        : busy ? t('loading')
-          : phase === 'signedOut' ? t('signedOut')
-            : phase === 'failed' ? t('failed')
-              : amountText === null ? t('failed') : null;
+        : loading ? t('loading')
+          : chipAmount !== null ? null
+            : phase === 'signedOut' ? t('signedOut')
+              : t('failed');
+      /** Localized text for the DeepSeek-side failure, or null while there is none. */
+      const errorText = error === null ? null : failureText(t, error);
       const hint = phase === 'signedOut' ? t('signedOutHint')
         : phase === 'unavailable' ? t('unavailableHint')
-          : error ?? (busy ? t('loading') : t('empty'));
-      const summary = amountText === null
-        ? `${t('label')} · ${stateText ?? t('failed')}`
-        : `${t('label')} ${rows.map(displayAmount).join(' + ')}`;
-      /** The dots say which window is open; the tooltip spells it out. */
-      const described = `${summary} · ${t(offPeak ? 'offPeak' : 'peak')}`;
+          : errorText ?? (loading ? t('loading') : t('empty'));
+      const summary = amountText !== null
+        ? `${t('label')} ${rows.map(displayAmount).join(' + ')}`
+        : moonshotAmount !== null
+          ? `${t('moonshot')} ${moonshotAmount}`
+          : `${t('label')} · ${stateText ?? t('failed')}`;
+      /**
+       * The billing window is a DeepSeek fact. It rides the tooltip — and the
+       * icon tint below — only while the chip speaks for DeepSeek; a
+       * Moonshot-only chip stays neutral rather than claiming a window that is
+       * not Moonshot's to have.
+       */
+      const described = moonshotOnly ? summary : `${summary} · ${t(offPeak ? 'offPeak' : 'peak')}`;
 
       const primary = signingIn
         ? h('button', {
@@ -730,11 +856,55 @@ window.__ModuleLoader__.load({
           }, t('signIn'))
           : null;
 
+      /**
+       * The Moonshot section: present outside a sign-in wait, and only while
+       * the Host Config has it on. It carries its own stamp because the two
+       * providers refresh on independent reads.
+       */
+      const moonshotSection = signingIn || !showMoonshot ? null : h(React.Fragment, { key: 'moonshot' }, [
+        h('div', { key: 'divider', className: 'dsh-sidebar-balance_divider' }),
+        h('div', { key: 'title', className: 'dsh-sidebar-balance_row' }, [
+          h('span', { key: 'label', className: 'dsh-sidebar-balance_rowLabel' }, t('moonshot')),
+          h('span', { key: 'value', className: 'dsh-sidebar-balance_rowValue' },
+            moonshotAmount !== null ? moonshotAmount
+              : moonshot === null || moonshotBusy ? t('loading')
+                : '—'),
+        ]),
+        moonshotReady && moonshot.cash !== null
+          ? h(WalletRow, { key: 'cash', row: { kind: 'moonshotCash', currency: 'CNY', amount: String(moonshot.cash) }, t })
+          : null,
+        moonshotReady && moonshot.voucher !== null
+          ? h(WalletRow, { key: 'voucher', row: { kind: 'moonshotVoucher', currency: 'CNY', amount: String(moonshot.voucher) }, t })
+          : null,
+        moonshotAt === null
+          ? null
+          : h('div', { key: 'stamp', className: 'dsh-sidebar-balance_note' },
+            `${t('updated')} ${new Date(moonshotAt).toLocaleTimeString()}`),
+        moonshotNoKey
+          ? h('div', { key: 'noKey', className: 'dsh-sidebar-balance_note' }, t('moonshotNoKey'))
+          : null,
+        moonshotFailed
+          ? h('div', {
+            key: 'moonshotError',
+            className: 'dsh-sidebar-balance_error',
+            // Keep the provider's own words reachable without printing them over
+            // the localized line.
+            title: typeof moonshot.error === 'string' ? moonshot.error : undefined,
+          }, failureText(t, moonshot))
+          : null,
+      ]);
+
       const panel = open ? h('div', {
         ref: panelRef,
+        id: PANEL_ID,
         className: 'dsh-sidebar-balance_panel',
         role: 'dialog',
+        // Matches the host's modal layer: it takes focus on open, wraps Tab, and
+        // owns Escape. There is deliberately no scrim — this stays a popover that
+        // a click anywhere else dismisses.
+        'aria-modal': 'true',
         'aria-label': t('label'),
+        tabIndex: -1,
         style: origin === null ? { visibility: 'hidden', bottom: 56, left: 8 } : { top: origin.top, left: origin.left },
       }, [
         signingIn
@@ -744,14 +914,27 @@ window.__ModuleLoader__.load({
               signIn.popupBlocked === true ? t('popupBlocked') : t('waitingHint')),
           ])
           : rows.length > 0
-            ? h('div', { key: 'wallets' }, rows.map((row) => h(WalletRow, { key: `${row.kind}-${row.currency}`, row, t })))
+            ? h(React.Fragment, { key: 'deepseek' }, [
+              h('div', { key: 'title', className: 'dsh-sidebar-balance_note' }, t('deepseek')),
+              h('div', { key: 'wallets' }, rows.map((row) => h(WalletRow, { key: `${row.kind}-${row.currency}`, row, t }))),
+            ])
             : h('div', { key: 'hint', className: 'dsh-sidebar-balance_note' },
               phase === 'signedOut' ? t('signInHint') : hint),
-        error !== null && !busy && !signingIn && rows.length > 0
-          ? h('div', { key: 'error', className: 'dsh-sidebar-balance_error' }, error)
+        moonshotSection,
+        errorText !== null && !inFlight && !signingIn && rows.length > 0
+          ? h('div', {
+            key: 'error',
+            className: 'dsh-sidebar-balance_error',
+            // The unlocalized Remote detail stays available on hover.
+            title: typeof error?.error === 'string' ? error.error : undefined,
+          }, errorText)
           : null,
         signIn.error !== null
-          ? h('div', { key: 'signInError', className: 'dsh-sidebar-balance_error' }, signIn.error)
+          ? h('div', {
+            key: 'signInError',
+            className: 'dsh-sidebar-balance_error',
+            title: typeof signIn.error?.error === 'string' ? signIn.error.error : undefined,
+          }, failureText(t, signIn.error))
           : null,
         h('div', { key: 'divider', className: 'dsh-sidebar-balance_divider' }),
         h('div', { key: 'actions', className: 'dsh-sidebar-balance_actions' }, [
@@ -788,11 +971,14 @@ window.__ModuleLoader__.load({
             key: 'refresh',
             type: 'button',
             className: 'dsh-sidebar-balance_action',
-            disabled: busy,
+            disabled: inFlight,
             title: t('refresh'),
             'aria-label': t('refresh'),
-            onClick: () => { refreshRef.current(); },
-          }, h(RefreshIcon, { size: 14, spinning: busy })),
+            onClick: () => {
+              refreshRef.current();
+              moonshotRefreshRef.current(true);
+            },
+          }, h(RefreshIcon, { size: 14, spinning: inFlight })),
         ]),
       ]) : null;
 
@@ -807,24 +993,24 @@ window.__ModuleLoader__.load({
           'data-open': open ? true : undefined,
           'aria-label': described,
           'aria-expanded': open,
+          'aria-haspopup': 'dialog',
+          'aria-controls': open ? PANEL_ID : undefined,
           title: described,
           onClick: () => { setOpen((value) => !value); },
         }, [
           h('span', {
             key: 'icon',
-            className: `dsh-sidebar-balance_icon ${offPeak ? 'dsh-sidebar-balance_iconIdle' : 'dsh-sidebar-balance_iconPeak'}`,
+            // Neutral while the chip speaks for Moonshot: the red/green tint is
+            // DeepSeek's billing window and would misattribute it.
+            className: moonshotOnly
+              ? 'dsh-sidebar-balance_icon'
+              : `dsh-sidebar-balance_icon ${offPeak ? 'dsh-sidebar-balance_iconIdle' : 'dsh-sidebar-balance_iconPeak'}`,
           }, h(WalletIcon, { size: wide ? 16 : 18 })),
           wide ? h('span', { key: 'label', className: 'dsh-sidebar-balance_label' }, t('label')) : null,
-          wide && amountText !== null ? h('span', { key: 'amount', className: 'dsh-sidebar-balance_amount' }, amountText) : null,
+          wide && chipAmount !== null ? h('span', { key: 'amount', className: 'dsh-sidebar-balance_amount' }, chipAmount) : null,
           wide && stateText !== null ? h('span', { key: 'state', className: 'dsh-sidebar-balance_state' }, stateText) : null,
         ]),
         panel,
-        h('div', { key: 'pops', className: 'dsh-sidebar-balance_pops' },
-          pops.map((pop) => h('span', {
-            key: pop.id,
-            className: 'dsh-sidebar-balance_pop',
-            style: { left: pop.left, top: pop.top },
-          }, pop.text))),
       ]);
     }
 
